@@ -36,6 +36,7 @@ from official.utils.logs import hooks_helper
 from official.utils.logs import logger
 from official.utils.misc import distribution_utils
 from official.utils.misc import model_helpers
+import json
 # pylint: enable=g-bad-import-order
 
 
@@ -402,11 +403,50 @@ def resnet_main(
 
   total_training_cycle = (flags_obj.train_epochs //
                           flags_obj.epochs_between_evals)
+  profiler_hook = tf.train.ProfilerHook(save_steps= 100, save_secs= None, output_dir="profs", show_memory=True, show_dataflow=True)
+
+
+  operations_tensors = {}
+  operations_names = tf.get_default_graph().get_operations()
+  count1 = 0
+  count2 = 0
+
+  for operation in operations_names:
+      operation_name = operation.name
+      operations_info = tf.get_default_graph().get_operation_by_name(operation_name).values()
+      if len(operations_info) > 0:
+          if not (operations_info[0].shape.ndims is None):
+              operation_shape = operations_info[0].shape.as_list()
+              operation_dtype_size = operations_info[0].dtype.size
+              if not (operation_dtype_size is None):
+                  operation_no_of_elements = 1
+                  for dim in operation_shape:
+                      if not(dim is None):
+                          operation_no_of_elements = operation_no_of_elements * dim
+                  total_size = operation_no_of_elements * operation_dtype_size
+                  operations_tensors[operation_name] = total_size
+              else:
+                  count1 = count1 + 1
+          else:
+              count1 = count1 + 1
+              operations_tensors[operation_name] = -1
+      else:
+          count2 = count2 + 1
+          operations_tensors[operation_name] = -1
+
+  print(count1)
+  print(count2)
+
+  with open('tensors_sz.json', 'w') as f:
+      json.dump(operations_tensors, f)
+
+
   for cycle_index in range(total_training_cycle):
     tf.logging.info('Starting a training cycle: %d/%d',
                     cycle_index, total_training_cycle)
 
-    classifier.train(input_fn=input_fn_train, hooks=train_hooks,
+
+    classifier.train(input_fn=input_fn_train, hooks=profiler_hook,
                      max_steps=flags_obj.max_train_steps)
 
     tf.logging.info('Starting to evaluate.')

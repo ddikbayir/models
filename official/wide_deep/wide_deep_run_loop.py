@@ -24,6 +24,7 @@ import shutil
 from absl import app as absl_app
 from absl import flags
 import tensorflow as tf  # pylint: disable=g-bad-import-order
+import json
 
 from official.utils.flags import core as flags_core
 from official.utils.logs import hooks_helper
@@ -97,9 +98,45 @@ def run_loop(name, train_input_fn, eval_input_fn, model_column_fn,
       flags_obj.hooks, model_dir=flags_obj.model_dir,
       batch_size=flags_obj.batch_size, tensors_to_log=tensors_to_log)
 
+  profiler_hook = tf.train.ProfilerHook(save_steps= 100, save_secs= None, output_dir="profs", show_memory=True, show_dataflow=True)
+
+
+  operations_tensors = {}
+  operations_names = tf.get_default_graph().get_operations()
+  count1 = 0
+  count2 = 0
+
+  for operation in operations_names:
+      operation_name = operation.name
+      operations_info = tf.get_default_graph().get_operation_by_name(operation_name).values()
+      if len(operations_info) > 0:
+          if not (operations_info[0].shape.ndims is None):
+              operation_shape = operations_info[0].shape.as_list()
+              operation_dtype_size = operations_info[0].dtype.size
+              if not (operation_dtype_size is None):
+                  operation_no_of_elements = 1
+                  for dim in operation_shape:
+                      if not(dim is None):
+                          operation_no_of_elements = operation_no_of_elements * dim
+                  total_size = operation_no_of_elements * operation_dtype_size
+                  operations_tensors[operation_name] = total_size
+              else:
+                  count1 = count1 + 1
+          else:
+              count1 = count1 + 1
+              operations_tensors[operation_name] = -1
+      else:
+          count2 = count2 + 1
+          operations_tensors[operation_name] = -1
+
+  print(count1)
+  print(count2)
+
+  with open('tensors_sz.json', 'w') as f:
+      json.dump(operations_tensors, f)
   # Train and evaluate the model every `flags.epochs_between_evals` epochs.
   for n in range(flags_obj.train_epochs // flags_obj.epochs_between_evals):
-    model.train(input_fn=train_input_fn, hooks=train_hooks)
+    model.train(input_fn=train_input_fn, hooks=profiler_hook)
 
     results = model.evaluate(input_fn=eval_input_fn)
 
