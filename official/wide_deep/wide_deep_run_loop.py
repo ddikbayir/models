@@ -105,7 +105,7 @@ def run_loop(name, train_input_fn, eval_input_fn, model_column_fn,
   
   #DOGA DEBUG GRAPH
   gdef = gpb.GraphDef()
-
+ 
   with open('/tmp/census_model/graph.pbtxt', 'r') as fh:
       graph_str = fh.read()
 
@@ -147,28 +147,29 @@ def run_loop(name, train_input_fn, eval_input_fn, model_column_fn,
 
   with open('tensors_sz.json', 'w') as f:
       json.dump(operations_tensors, f)
+  
   # Train and evaluate the model every `flags.epochs_between_evals` epochs.
   for n in range(flags_obj.train_epochs // flags_obj.epochs_between_evals):
-    model.train(input_fn=train_input_fn, hooks=[profiler_hook])
+      model.train(input_fn=train_input_fn, hooks=[profiler_hook])
 
-    results = model.evaluate(input_fn=eval_input_fn)
+      results = model.evaluate(input_fn=eval_input_fn)
 
-    # Display evaluation metrics
-    tf.logging.info('Results at epoch %d / %d',
-                    (n + 1) * flags_obj.epochs_between_evals,
-                    flags_obj.train_epochs)
-    tf.logging.info('-' * 60)
+      # Display evaluation metrics
+      tf.logging.info('Results at epoch %d / %d',
+                      (n + 1) * flags_obj.epochs_between_evals,
+                      flags_obj.train_epochs)
+      tf.logging.info('-' * 60)
 
-    for key in sorted(results):
-      tf.logging.info('%s: %s' % (key, results[key]))
+      for key in sorted(results):
+        tf.logging.info('%s: %s' % (key, results[key]))
 
-    benchmark_logger.log_evaluation_result(results)
+      benchmark_logger.log_evaluation_result(results)
 
-    if early_stop and model_helpers.past_stop_threshold(
-        flags_obj.stop_threshold, results['accuracy']):
-      break
+      if early_stop and model_helpers.past_stop_threshold(
+          flags_obj.stop_threshold, results['accuracy']):
+        break
 
   # Export the model
   if flags_obj.export_dir is not None:
-    export_model(model, flags_obj.model_type, flags_obj.export_dir,
-                 model_column_fn)
+      export_model(model, flags_obj.model_type, flags_obj.export_dir,
+                   model_column_fn)
