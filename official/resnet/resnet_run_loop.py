@@ -37,6 +37,9 @@ from official.utils.logs import logger
 from official.utils.misc import distribution_utils
 from official.utils.misc import model_helpers
 import json
+from tensorflow.core.framework import graph_pb2 as gpb
+from google.protobuf import text_format as pbtf
+
 # pylint: enable=g-bad-import-order
 
 
@@ -405,40 +408,49 @@ def resnet_main(
                           flags_obj.epochs_between_evals)
   profiler_hook = tf.train.ProfilerHook(save_steps= 100, save_secs= None, output_dir="profs", show_memory=True, show_dataflow=True)
 
+  #DOGA DEBUG GRAPH
+  gdef = gpb.GraphDef()
 
-  operations_tensors = {}
-  operations_names = tf.get_default_graph().get_operations()
-  count1 = 0
-  count2 = 0
+  with open('/tmp/cifar10_model/graph.pbtxt', 'r') as fh:
+      graph_str = fh.read()
 
-  for operation in operations_names:
-      operation_name = operation.name
-      operations_info = tf.get_default_graph().get_operation_by_name(operation_name).values()
-      if len(operations_info) > 0:
-          if not (operations_info[0].shape.ndims is None):
-              operation_shape = operations_info[0].shape.as_list()
-              operation_dtype_size = operations_info[0].dtype.size
-              if not (operation_dtype_size is None):
-                  operation_no_of_elements = 1
-                  for dim in operation_shape:
-                      if not(dim is None):
-                          operation_no_of_elements = operation_no_of_elements * dim
-                  total_size = operation_no_of_elements * operation_dtype_size
-                  operations_tensors[operation_name] = total_size
+  pbtf.Parse(graph_str, gdef)
+  with tf.Graph().as_default() as graph:
+      tf.import_graph_def(gdef)
+  
+      operations_tensors = {}
+      operations_names = graph.get_operations()
+      count1 = 0
+      count2 = 0
+      #print(operations_names)
+      for operation in operations_names:
+          operation_name = operation.name
+          operations_info = graph.get_operation_by_name(operation_name).values()
+          if len(operations_info) > 0:
+              if not (operations_info[0].shape.ndims is None):
+                  operation_shape = operations_info[0].shape.as_list()
+                  operation_dtype_size = operations_info[0].dtype.size
+                  if not (operation_dtype_size is None):
+                      operation_no_of_elements = 1
+                      for dim in operation_shape:
+                          if not(dim is None):
+                              operation_no_of_elements = operation_no_of_elements * dim
+                      total_size = operation_no_of_elements * operation_dtype_size
+                      operations_tensors[operation_name] = total_size
+                  else:
+                      count1 = count1 + 1
               else:
                   count1 = count1 + 1
+                  operations_tensors[operation_name] = -1
           else:
-              count1 = count1 + 1
+              count2 = count2 + 1
               operations_tensors[operation_name] = -1
-      else:
-          count2 = count2 + 1
-          operations_tensors[operation_name] = -1
 
-  print(count1)
-  print(count2)
+      print(count1)
+      print(count2)
 
-  with open('tensors_sz.json', 'w') as f:
-      json.dump(operations_tensors, f)
+      with open('tensors_sz.json', 'w') as f:
+          json.dump(operations_tensors, f)
 
 
   for cycle_index in range(total_training_cycle):
@@ -446,7 +458,7 @@ def resnet_main(
                     cycle_index, total_training_cycle)
 
 
-    classifier.train(input_fn=input_fn_train, hooks=profiler_hook,
+    classifier.train(input_fn=input_fn_train, hooks=[profiler_hook],
                      max_steps=flags_obj.max_train_steps)
 
     tf.logging.info('Starting to evaluate.')
