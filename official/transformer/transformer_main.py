@@ -25,6 +25,7 @@ from __future__ import print_function
 import functools
 import os
 import tempfile
+import json
 
 # pylint: disable=g-bad-import-order
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -48,6 +49,9 @@ from official.utils.logs import hooks_helper
 from official.utils.logs import logger
 from official.utils.misc import distribution_utils
 from official.utils.misc import model_helpers
+from google.protobuf import text_format as pbtf
+
+
 
 PARAMS_MAP = {
     "tiny": model_params.TINY_PARAMS,
@@ -320,6 +324,53 @@ def run_loop(
       # Change loop stopping condition if bleu_threshold is defined.
       schedule_manager.train_eval_iterations = INF
 
+  profiler_hook = tf.train.ProfilerHook(save_steps= 100, save_secs= None, output_dir="profs", show_memory=True, show_dataflow=True)
+
+
+  gdef = gpb.GraphDef()
+ 
+  with open('/tmp/census_model/graph.pbtxt', 'r') as fh:
+      graph_str = fh.read()
+
+  pbtf.Parse(graph_str, gdef)
+
+  with tf.Graph().as_default() as graph:
+      tf.import_graph_def(gdef)
+
+      operations_tensors = {}
+      operations_names = tf.get_default_graph().get_operations()
+      count1 = 0
+      count2 = 0
+
+      for operation in operations_names:
+          operation_name = operation.name
+          operations_info = tf.get_default_graph().get_operation_by_name(operation_name).values()
+          if len(operations_info) > 0:
+              if not (operations_info[0].shape.ndims is None):
+                  operation_shape = operations_info[0].shape.as_list()
+                  operation_dtype_size = operations_info[0].dtype.size
+                  if not (operation_dtype_size is None):
+                      operation_no_of_elements = 1
+                      for dim in operation_shape:
+                          if not(dim is None):
+                              operation_no_of_elements = operation_no_of_elements * dim
+                      total_size = operation_no_of_elements * operation_dtype_size
+                      operations_tensors[operation_name] = total_size
+                  else:
+                      count1 = count1 + 1
+              else:
+                  count1 = count1 + 1
+                  operations_tensors[operation_name] = -1
+          else:
+              count2 = count2 + 1
+              operations_tensors[operation_name] = -1
+
+      print(count1)
+      print(count2)
+
+  with open('tensors_sz.json', 'w') as f:
+      json.dump(operations_tensors, f)
+
   # Loop training/evaluation/bleu cycles
   for i in xrange(schedule_manager.train_eval_iterations):
     tf.logging.info("Starting iteration %d" % (i + 1))
@@ -329,7 +380,7 @@ def run_loop(
     estimator.train(
         dataset.train_input_fn,
         steps=schedule_manager.single_iteration_train_steps,
-        hooks=train_hooks)
+        hooks=[profiler_hook])
 
     eval_results = estimator.evaluate(
         input_fn=dataset.eval_input_fn,
